@@ -1,0 +1,625 @@
+#+TITLE: atom-pi-extensions Implementation Plan
+#+AUTHOR: Thomas
+#+CREATED: [2026-05-14]
+#+OPTIONS: toc:3 num:nil
+
+* Overview
+
+Two pi-coding-agent extensions that together implement VS Code Copilot-style
+operational modes. They are designed to be independent of each other: ~atom-plan~
+registers tools (~create_plan~, ~edit_plan~) that ~atom-modes~ may or may not permit
+depending on mode configuration, but neither extension has a compile-time or
+runtime dependency on the other.
+
+** Extensions
+
+- ~atom-modes~ :: Declarative mode system. Controls which tools the LLM may use in
+  a given mode and injects a mode-specific system reminder on each turn. All tools
+  remain registered and active at all times (cache-stable); enforcement happens via
+  ~tool_call~ interception.
+
+- ~atom-plan~ :: Plan file management. Provides ~create_plan~ and ~edit_plan~ tools,
+  tracks a "current plan" as session state, and injects the plan's org content into
+  context whenever it changes or after a context reset.
+
+** Pi Config Versioning
+
+The recommended setup is to track =~/.pi/agent/= as a git repository.
+
+- *Tracked:* =settings.json= (includes installed packages list), =keybindings.json=,
+  =AGENTS.md=, =models.json=, =modes/= (atom-modes config), =skills/=, =prompts/=.
+- *Gitignored:* =sessions/= (personal history), =git/= and =npm/= (installed package
+  files, reproduced by =pi install=), =node_modules/=.
+- =settings.json= already records all installed packages in its =packages= array.
+  Bootstrapping a new machine is: clone the repo, then
+  =jq -r '.packages[]?' settings.json | xargs -I{} pi install {}=.
+- =atom-pi-extensions= is installed as a pi package and recorded in =settings.json=.
+  Mode config files (=.md=) live in =~/.pi/agent/modes/= and are tracked by the
+  config repo. Extension code and user config are versioned independently.
+
+** Guiding Constraints
+
+These constraints were established during design and must be respected throughout
+implementation.
+
+1. *Cache stability.* The provider payload's tool list and system prompt must never
+   change mid-session. Changing either invalidates the KV-tensor cache for the
+   entire conversation history, multiplying inference cost by the number of
+   accumulated messages. All dynamic information (mode, plan) is injected into the
+   last user message of the payload instead.
+
+2. *Extension independence.* ~atom-modes~ and ~atom-plan~ share no imports or
+   runtime coupling. The only connection is that mode ~.md~ files may include
+   ~create_plan~ and/or ~edit_plan~ in their tool allowlists — plain strings, no
+   code dependency.
+
+3. *Allowlist over blocklist.* Modes declare which tools are permitted, not which
+   are forbidden. Unknown tools are implicitly blocked. This avoids silent
+   permission escalation when new tools are added by other extensions.
+
+4. *A mode is always active.* There is no "no mode" state. The default agent mode
+   is still a mode with its own allowlist and reminder. This matters because even
+   agent mode does not permit ~create_plan~.
+
+* Repository Structure
+
+#+BEGIN_EXAMPLE
+atom-pi-extensions/
+├── PLAN.org                        ← this file
+├── README.md
+├── examples/
+│   └── modes/                      ← sample mode files to copy into ~/.pi/agent/modes/
+│       ├── agent.md
+│       ├── plan.md
+│       └── ask.md
+└── extensions/
+    ├── atom-modes/
+    │   ├── package.json
+    │   └── index.ts
+    └── atom-plan/
+        ├── package.json
+        └── index.ts
+#+END_EXAMPLE
+
+Mode files are *user config*, not part of the extension code. The =examples/modes/=
+directory provides starting points to copy into =~/.pi/agent/modes/=. Users are
+expected to maintain their own mode files there, potentially listing tools from
+other extensions that are not referenced in this repo at all.
+
+Each extension is a self-contained pi package installable via:
+#+BEGIN_EXAMPLE
+pi install git:github.com/<user>/atom-pi-extensions#extensions/atom-modes
+pi install git:github.com/<user>/atom-pi-extensions#extensions/atom-plan
+#+END_EXAMPLE
+
+Or placed directly in =~/.pi/agent/extensions/= for local use.
+
+* Extension 1: atom-modes
+
+** Purpose
+
+Enforce operational modes by intercepting tool calls and rejecting any tool not
+on the current mode's allowlist. Inject a ~<system-reminder>~ block into the last
+user message of the provider payload whenever the active mode has changed since
+the last injection, so the LLM always knows which tools it may call and what its
+current role is.
+
+** Mode Definition Format
+
+Each mode is a Markdown file under =~/.pi/agent/modes/= (or =.pi/modes/= for
+project-local overrides). The filename (without extension, lowercased) becomes
+the mode's id used with =/mode= and =--mode=.
+
+#+BEGIN_EXAMPLE
+---
+name: Plan
+color: muted
+tools:
+  - read
+  - grep
+  - find
+  - ls
+  - edit_plan
+  - create_plan
+---
+You are in planning mode. Your goal is to explore the codebase and produce a
+concrete implementation plan. Do not attempt to make any changes to source
+files.
+#+END_EXAMPLE
+
+Frontmatter fields:
+- ~name~ :: Display name (defaults to filename with first letter capitalised).
+- ~color~ :: Theme colour for the editor border label. One of ~accent~, ~warning~,
+  ~muted~, ~success~, ~error~, ~dim~. Defaults to ~accent~.
+- ~tools~ :: Allowlist of tool names. Only these tools may be called while this
+  mode is active. Any tool not listed is blocked.
+
+The body after the second ~---~ is the mode prompt. It is included verbatim in the
+~<system-reminder>~ injection. May be empty (agent mode).
+
+** Example Mode Files (=examples/modes/=)
+
+*** ~modes/agent.md~
+
+#+BEGIN_EXAMPLE
+---
+name: Agent
+color: accent
+tools:
+  - read
+  - write
+  - edit
+  - bash
+  - grep
+  - find
+  - ls
+  - edit_plan
+---
+#+END_EXAMPLE
+
+No body — the reminder for agent mode only needs to communicate the tool
+restriction (no ~create_plan~).
+
+*** ~modes/plan.md~
+
+#+BEGIN_EXAMPLE
+---
+name: Plan
+color: muted
+tools:
+  - read
+  - grep
+  - find
+  - ls
+  - edit_plan
+  - create_plan
+---
+You are in planning mode. Explore the codebase read-only and produce or refine
+a structured implementation plan using the create_plan / edit_plan tools.
+Do not modify any source files.
+#+END_EXAMPLE
+
+*** ~modes/ask.md~
+
+#+BEGIN_EXAMPLE
+---
+name: Ask
+color: warning
+tools:
+  - read
+  - grep
+  - find
+  - ls
+---
+You are in ask mode. Answer the user's question using only read-only
+exploration. Do not modify any files or create plans.
+#+END_EXAMPLE
+
+** Data Structures
+
+#+BEGIN_SRC typescript
+interface ModeDef {
+  id: string;           // lowercased filename without .md
+  name: string;         // display name
+  color: string;        // theme colour key
+  allowedTools: Set<string>;
+  prompt: string;       // mode body, may be empty
+}
+#+END_SRC
+
+In-memory state (module-level, reset on ~session_shutdown~):
+
+#+BEGIN_SRC typescript
+let modes: ModeDef[] = [];        // populated in session_start from user config dirs
+let currentModeIndex = 0;         // index into modes[]
+let lastInjectedModeId: string | null = null;
+#+END_SRC
+
+** Behaviours
+
+*** Mode File Discovery and Parsing
+
+Mode files are read from two locations, merged in order (project-local overrides
+global by same id):
+
+1. *Global:* =$PI_CODING_AGENT_DIR/modes/= (defaults to =~/.pi/agent/modes/=).
+   =$PI_CODING_AGENT_DIR= is read from the environment; if unset, =os.homedir()=
+   is used to construct the default path.
+2. *Project-local:* =.pi/modes/= relative to =ctx.cwd= at =session_start= time.
+
+Discovery runs in the =session_start= handler (not at extension load time) because
+=ctx.cwd= is only available there. Files without a leading =---= frontmatter block
+are silently skipped. Duplicate ids across both directories log a warning and the
+project-local definition wins. If no mode files are found in either location, the
+extension emits a warning and installs a single hard-coded fallback mode (all
+built-in tools allowed) so pi remains usable.
+
+The =examples/modes/= directory in this repository is never loaded automatically.
+It exists solely as a reference for users setting up their =~/.pi/agent/modes/=.
+
+*** Tool Call Interception
+
+Handled in the ~tool_call~ event. For every tool call:
+
+1. Look up the current mode's ~allowedTools~ set.
+2. If ~event.toolName~ is not in the set, return ~{ block: true, reason: "Tool
+   '<name>' is not available in <Mode> mode. Available tools: <comma-separated
+   list>." }~.
+3. Otherwise return nothing (allow execution).
+
+This is the sole enforcement mechanism. ~pi.setActiveTools()~ is never called.
+
+*** Mode Reminder Injection
+
+Handled in the ~before_provider_request~ event.
+
+Inject when ~currentMode.id !== lastInjectedModeId~. After injecting, set
+~lastInjectedModeId = currentMode.id~.
+
+Reset ~lastInjectedModeId = null~ on:
+- ~session_start~ (any reason) — ensures the reminder fires on the first turn of
+  every session, including fresh ones.
+- ~session_compact~ — the compaction summary may not preserve mode context.
+- Mode switch (see below) — forces re-injection with the new mode's content.
+
+*Injection target.* Find the last message with ~role: "user"~ in
+~payload.messages~. Append a new text block to its content array (Anthropic) or
+append to the content string (OpenAI). Never touch ~payload.system~.
+
+*Injected content:*
+
+#+BEGIN_EXAMPLE
+<system-reminder>
+You are in <Name> mode.
+
+Available tools: tool1, tool2, ...
+Calling any other tool will be rejected.
+
+<mode prompt body — omitted if empty>
+</system-reminder>
+#+END_EXAMPLE
+
+*Helper function* (provider-agnostic):
+
+#+BEGIN_SRC typescript
+function appendToLastUserMessage(payload: any, text: string): void {
+  if (!Array.isArray(payload.messages)) return;
+  for (let i = payload.messages.length - 1; i >= 0; i--) {
+    const msg = payload.messages[i];
+    if (msg.role !== "user") continue;
+    if (typeof msg.content === "string") {
+      msg.content += `\n\n${text}`;
+    } else if (Array.isArray(msg.content)) {
+      msg.content.push({ type: "text", text });
+    }
+    break;
+  }
+}
+#+END_SRC
+
+*** Mode Switching
+
+On switch:
+1. Update ~currentModeIndex~.
+2. Set ~lastInjectedModeId = null~ to force re-injection on the next turn.
+3. Persist via ~pi.appendEntry("atom-modes-state", { modeId: modes[currentModeIndex].id })~.
+4. Notify the user: ~ctx.ui.notify(`Switched to ${mode.name} mode`, "info")~.
+
+*** Session State & Persistence
+
+On ~session_start~:
+- Set ~lastInjectedModeId = null~.
+- If ~reason === "new"~: reset to default mode (first mode whose id is ~"agent"~,
+  or index 0 as fallback).
+- Otherwise: scan ~ctx.sessionManager.getEntries()~ in reverse for the last entry
+  with ~customType === "atom-modes-state"~. Restore ~currentModeIndex~ from
+  ~entry.data.modeId~ if found.
+- If the ~--mode~ CLI flag is set, it overrides the restored state.
+
+On ~session_compact~:
+- Set ~lastInjectedModeId = null~.
+
+*** Editor Label
+
+Register a ~CustomEditor~ subclass in the ~session_start~ handler (same pattern as
+pi-modes) that renders the current mode name and colour on the bottom border of
+the editor widget.
+
+*** Commands
+
+~/mode~ :: Without arguments: show current mode name and available tools. With
+argument: switch to the named mode. Supports argument autocompletion from
+~modes[].id~.
+
+*** Keyboard Shortcuts
+
+| Shortcut       | Action        |
+|----------------+---------------|
+| ~Ctrl+Shift+L~ | Next mode     |
+| ~Ctrl+Shift+H~ | Previous mode |
+
+*** CLI Flag
+
+#+BEGIN_SRC
+--mode <id>   Start in the specified mode (overrides persisted state)
+#+END_SRC
+
+Registered via ~pi.registerFlag("mode", { type: "string" })~.
+
+** Tasks
+
+*** TODO Discover and parse mode .md files in session_start handler
+Read from =$PI_CODING_AGENT_DIR/modes/= and =.pi/modes/= (relative to =ctx.cwd=).
+Merge with project-local overriding global by id. Parse YAML frontmatter (name,
+color, tools allowlist). Parse body as mode prompt. Log warnings for malformed
+files. Emit warning and install hard-coded fallback if no files found. Populate
+=modes[]=.
+
+*** TODO Implement tool_call interception
+Subscribe to ~tool_call~ event. Check ~event.toolName~ against current mode's
+~allowedTools~. Return ~{ block: true, reason: "..." }~ with list of available tools
+if not allowed.
+
+*** TODO Implement mode reminder injection
+Subscribe to ~before_provider_request~. Build injection text from current mode.
+Call ~appendToLastUserMessage~. Update ~lastInjectedModeId~.
+
+*** TODO Implement appendToLastUserMessage helper
+Handle Anthropic (content array) and OpenAI (content string) payload shapes.
+
+*** TODO Implement session_start handler
+Restore mode from session entries. Handle ~"new"~ reason. Apply ~--mode~ flag.
+Reset ~lastInjectedModeId~.
+
+*** TODO Implement session_compact handler
+Reset ~lastInjectedModeId~.
+
+*** TODO Register /mode command with autocomplete
+Show current mode on bare ~/mode~. Switch on ~/mode <id>~. Notify on success/error.
+Wire argument autocompletion.
+
+*** TODO Register Ctrl+Shift+L / Ctrl+Shift+H shortcuts
+
+*** TODO Register --mode CLI flag
+
+*** TODO Implement editor label (CustomEditor subclass)
+Render current mode name in mode's colour on editor bottom border.
+
+*** TODO Write example mode files: examples/modes/agent.md, plan.md, ask.md
+These are reference files for users to copy into =~/.pi/agent/modes/=. They are
+never loaded by the extension itself.
+
+*** TODO Write package.json
+
+* Extension 2: atom-plan
+
+** Purpose
+
+Provide two tools (~create_plan~, ~edit_plan~) that manage a single "current plan"
+file per session. When a current plan exists, inject its content into the last
+user message of the provider payload whenever the content has changed since the
+last injection or after a context reset. This keeps the LLM aware of the plan
+state without bloating the context on every unchanged turn.
+
+** Plan File Format
+
+Plans are stored as org-mode files under ~<project-root>/.pi/plans/~.
+
+Filename: ~<ISO-date>-<slug>.org~ where the slug is derived from the ~title~
+argument by lowercasing and replacing non-alphanumeric characters with hyphens.
+
+Example: ~.pi/plans/2026-05-14-refactor-auth.org~
+
+Default template (used when ~content~ is not provided to ~create_plan~):
+
+#+BEGIN_EXAMPLE
+#+TITLE: <title>
+#+CREATED: [<YYYY-MM-DD>]
+
+* Goal
+
+* Tasks
+
+** TODO
+
+#+END_EXAMPLE
+
+The template gives the LLM an anchor for its first ~edit_plan~ call. An empty file
+would cause the text-replacement approach to fail on the first edit.
+
+** Data Structures
+
+In-memory state (module-level, reset on ~session_shutdown~):
+
+#+BEGIN_SRC typescript
+let currentPlanPath: string | null = null;
+let lastInjectedPlanContent: string | null = null;
+#+END_SRC
+
+** Tools
+
+*** create_plan
+
+*Parameters:*
+
+#+BEGIN_SRC typescript
+{
+  title: string;     // human-readable title; used for #+TITLE and filename slug
+  content?: string;  // full org file content; default template used if omitted
+}
+#+END_SRC
+
+*Behaviour:*
+
+1. If ~currentPlanPath !== null~, return an error: "A plan is already active at
+   ~<path>~. Use ~/plan clear~ to detach it before creating a new one."
+2. Ensure ~<project-root>/.pi/plans/~ exists (create recursively if needed).
+3. Derive filename: ~<YYYY-MM-DD>-<slug>.org~.
+4. Write ~content~ (or default template) to the file.
+5. Set ~currentPlanPath~ to the absolute file path.
+6. Persist: ~pi.appendEntry("atom-plan-state", { planFile: absolutePath })~.
+7. Reset ~lastInjectedPlanContent = null~ to trigger immediate injection.
+8. Return success: "Plan created at ~<relative-path>~."
+
+*The project root* is determined as the nearest ancestor directory containing a
+~.pi/~ directory, falling back to ~ctx.cwd~.
+
+*** edit_plan
+
+*Parameters:*
+
+#+BEGIN_SRC typescript
+{
+  edits: Array<{
+    oldText: string;   // exact text to find (must be unique in the file)
+    newText: string;   // replacement text
+  }>;
+}
+#+END_SRC
+
+*Behaviour:*
+
+1. If ~currentPlanPath === null~, return an error: "No active plan. Use
+   ~create_plan~ first."
+2. Read the current file content.
+3. For each edit in order:
+   a. Find the first occurrence of ~oldText~.
+   b. If not found, return an error identifying which edit failed and the current
+      file content (so the LLM can correct its next attempt).
+   c. Replace with ~newText~.
+4. Write the updated content back to disk.
+5. ~lastInjectedPlanContent~ is intentionally *not* updated here — the comparison
+   in ~before_provider_request~ will detect the change on the next turn and inject
+   it automatically.
+6. Return the updated file content so the LLM can confirm the result in the same
+   turn.
+
+The parameter shape mirrors pi's built-in ~edit~ tool to keep the LLM's
+mental model consistent.
+
+** Behaviours
+
+*** Plan Injection
+
+Handled in the ~before_provider_request~ event.
+
+Only runs when ~currentPlanPath !== null~.
+
+1. Read the plan file from disk (handles manual edits via ~/plan open~).
+2. Compare with ~lastInjectedPlanContent~.
+3. If different (or ~lastInjectedPlanContent === null~): inject and update
+   ~lastInjectedPlanContent~.
+4. If identical: do nothing.
+
+Reset ~lastInjectedPlanContent = null~ on:
+- ~session_start~ with reason other than ~"new"~ — ensures one injection at the
+  start of a resumed session in case the plan is no longer prominent in the
+  restored context.
+- ~session_compact~ — the compaction summary may not preserve the plan content.
+
+*Injection target:* Same ~appendToLastUserMessage~ helper pattern as ~atom-modes~.
+The two extensions both modify the last user message; since ~before_provider_request~
+handlers chain (each sees the previous handler's mutations), the order they load
+determines which block appears first. This is acceptable.
+
+*Injected content:*
+
+#+BEGIN_EXAMPLE
+<current-plan path=".pi/plans/2026-05-14-refactor-auth.org">
+<full org file content>
+</current-plan>
+#+END_EXAMPLE
+
+*** Session State & Persistence
+
+Persistence key: ~"atom-plan-state"~, data shape: ~{ planFile: string | null }~.
+
+On ~session_start~:
+- If ~reason === "new"~: ~currentPlanPath = null~, ~lastInjectedPlanContent = null~. Do not restore.
+- Otherwise: scan entries in reverse for the last ~atom-plan-state~ entry. If
+  ~entry.data.planFile~ is a non-null string, set ~currentPlanPath~ to that value
+  and ~lastInjectedPlanContent = null~. If ~null~, ~currentPlanPath = null~.
+
+On ~session_compact~:
+- ~lastInjectedPlanContent = null~.
+
+*** Commands
+
+~/plan~ :: Without arguments: if no active plan, notify "No active plan." If a
+plan is active, display the plan path and full org content in a notification (or
+via ~ctx.ui.notify~).
+
+~/plan clear~ :: Detach the current plan from the session.
+1. If no active plan, notify "No active plan."
+2. Set ~currentPlanPath = null~, ~lastInjectedPlanContent = null~.
+3. Persist: ~pi.appendEntry("atom-plan-state", { planFile: null })~.
+4. Notify: "Plan detached. The file has not been deleted."
+
+~/plan open~ :: Open the current plan file in ~$VISUAL~ (falling back to
+~$EDITOR~, then ~vi~) using ~pi.exec~. If no active plan, notify "No active plan."
+
+** Tasks
+
+*** TODO Implement create_plan tool
+Validate no existing plan. Derive filename from title. Create ~.pi/plans/~ dir if
+needed. Write file with content or default template. Update state. Persist.
+Return success or error message.
+
+*** TODO Implement edit_plan tool
+Validate plan exists. Read file. Apply sequential text replacements. Write file.
+Return updated content or first-failing edit error.
+
+*** TODO Implement plan injection in before_provider_request
+Read plan from disk. Compare with ~lastInjectedPlanContent~. Inject if changed or
+null. Use ~appendToLastUserMessage~.
+
+*** TODO Implement session_start handler
+Restore ~currentPlanPath~ from entries on non-new sessions. Reset
+~lastInjectedPlanContent~. Leave state empty on reason "new".
+
+*** TODO Implement session_compact handler
+Reset ~lastInjectedPlanContent~.
+
+*** TODO Register /plan command
+Handle bare ~/plan~ (show), ~/plan clear~ (detach), ~/plan open~ (open in editor).
+
+*** TODO Write package.json
+
+* Known Limitations
+
+- *Fork shares plan file.* When a session is forked, both the parent and child
+  session point to the same ~.org~ file. Edits in one session affect the other.
+  Workaround: manually copy the file and use ~/plan clear~ + ~/plan open~ +
+  ~create_plan~ in the fork if isolation is needed.
+
+- *Tool call rejection wastes tokens.* If the LLM attempts a blocked tool, the
+  rejection appears in the context as a tool result, consuming tokens. The mode
+  reminder lists available tools to minimise this, but it can still happen
+  (especially at the start of a session before the reminder is established).
+
+- *edit_plan does not understand org syntax.* It applies plain text replacements,
+  the same as pi's built-in ~edit~ tool. Org-specific operations (toggling TODO
+  state across all items, reordering headings) must be expressed as text
+  replacements or done manually.
+
+- *appendToLastUserMessage assumes a user message exists.* The
+  ~before_provider_request~ handler will silently do nothing if the messages array
+  has no user message. This should not happen in normal operation but could occur
+  in edge cases (e.g., first turn of a session being a tool-only continuation).
+
+* Future Work
+
+- ~/plan list~ :: Show all ~.org~ files under ~.pi/plans/~ and allow re-attaching
+  an existing plan to the current session.
+
+- ~read_only_bash~ tool :: A sandboxed bash tool that blocks writes at the OS
+  level. Once implemented, it can be added to plan/ask mode allowlists in place of
+  the current approach of simply omitting bash.
+
+- Plan UI widget :: Parse org TODO/DONE headings from the current plan and display
+  a live progress widget via ~ctx.ui.setWidget~. Deferred pending UI API
+  compatibility with alternative pi frontends.
+
+- Automated plan file deep-copy on fork :: Hook ~session_before_fork~ to copy the
+  plan file to a new path and rewrite the ~atom-plan-state~ entry in the new
+  session, eliminating the shared-file limitation.
