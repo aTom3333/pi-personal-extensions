@@ -12,11 +12,9 @@
 
 import matter from "gray-matter";
 import {
-  CustomEditor,
   type ExtensionAPI,
-  type KeybindingsManager,
+  type ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
-import type { EditorTheme, TUI } from "@mariozechner/pi-tui";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -37,7 +35,6 @@ interface ModeDef {
 let modes: ModeDef[] = [];
 let currentModeIndex = 0;
 let lastInjectedModeId: string | null = null;
-let activeTui: TUI | undefined;
 // Built once per session from modes[] — stable across turns, safe to put in system prompt.
 let systemPromptAddition = "";
 
@@ -247,13 +244,21 @@ function buildReminderText(mode: ModeDef): string {
 
 // ── Mode switch helper ─────────────────────────────────────────────────────
 
-function switchToMode(idx: number, pi: ExtensionAPI, notifyFn: (msg: string) => void): void {
+function updateModeStatus(ctx: ExtensionContext): void {
+  if (modes.length === 0) return;
+  const mode = modes[currentModeIndex];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const label = (ctx.ui.theme.fg as (c: string, t: string) => string)(mode.color, mode.name);
+  ctx.ui.setStatus("mode", label);
+}
+
+function switchToMode(idx: number, pi: ExtensionAPI, ctx: ExtensionContext): void {
   currentModeIndex = idx;
   lastInjectedModeId = null;
   const mode = modes[idx];
   pi.appendEntry("mode-state", { modeId: mode.id });
-  notifyFn(`Switched to ${mode.name} mode`);
-  activeTui?.requestRender();
+  ctx.ui.notify(`Switched to ${mode.name} mode`, "info");
+  updateModeStatus(ctx);
 }
 
 // ── Extension entry point ──────────────────────────────────────────────────
@@ -321,47 +326,15 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // ── Editor label ─────────────────────────────────────────────────────
-    // Capture ctx so the CustomEditor render() can access ctx.ui.theme.
-    const capturedCtx = ctx;
-
-    class ModeEditor extends CustomEditor {
-      constructor(tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) {
-        super(tui, theme, keybindings, { paddingX: 0 });
-        activeTui = tui;
-      }
-
-      render(width: number): string[] {
-        const lines = super.render(width);
-        if (lines.length < 2) return lines;
-
-        const mode = modes[currentModeIndex];
-        if (!mode) return lines;
-
-        const thm = capturedCtx.ui.theme;
-        const borderFn = (text: string) => this.borderColor(text);
-
-        // Bottom border: "─ ModeName ──────────────────────"
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const label = (thm.fg as (c: string, t: string) => string)(mode.color, ` ${mode.name} `);
-        const labelVisible = mode.name.length + 2; // " Name "
-        const gapWidth = Math.max(0, width - 2 - labelVisible);
-        lines[lines.length - 1] =
-          `${borderFn("─")}${label}${borderFn("─".repeat(gapWidth))}${borderFn("─")}`;
-
-        return lines;
-      }
-    }
-
-    ctx.ui.setEditorComponent((tui, theme, keybindings) => new ModeEditor(tui, theme, keybindings));
+    updateModeStatus(ctx);
   });
 
   pi.on("session_compact", async () => {
     lastInjectedModeId = null;
   });
 
-  pi.on("session_shutdown", async () => {
-    activeTui = undefined;
+  pi.on("session_shutdown", async (_event, ctx) => {
+    ctx.ui.setStatus("mode", undefined);
   });
 
   // ── Static system-prompt injection ───────────────────────────────────────
@@ -432,7 +405,7 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      switchToMode(idx, pi, (msg) => ctx.ui.notify(msg, "info"));
+      switchToMode(idx, pi, ctx);
     },
   });
 
@@ -442,7 +415,7 @@ export default function (pi: ExtensionAPI) {
     handler: async (ctx) => {
       if (modes.length === 0) return;
       const nextIdx = (currentModeIndex + 1) % modes.length;
-      switchToMode(nextIdx, pi, (msg) => ctx.ui.notify(msg, "info"));
+      switchToMode(nextIdx, pi, ctx);
     },
   });
 
@@ -451,7 +424,7 @@ export default function (pi: ExtensionAPI) {
     handler: async (ctx) => {
       if (modes.length === 0) return;
       const prevIdx = (currentModeIndex - 1 + modes.length) % modes.length;
-      switchToMode(prevIdx, pi, (msg) => ctx.ui.notify(msg, "info"));
+      switchToMode(prevIdx, pi, ctx);
     },
   });
 }
