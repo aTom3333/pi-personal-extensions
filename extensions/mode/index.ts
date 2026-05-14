@@ -1,5 +1,5 @@
 /**
- * atom-modes — Declarative mode system for pi-coding-agent
+ * mode — Declarative mode system for pi-coding-agent
  *
  * Enforces operational modes by:
  * - Intercepting tool calls and blocking any tool not on the current mode's allowlist
@@ -48,7 +48,7 @@ function parseModeFile(filePath: string, rawContent: string): ModeDef | null {
   try {
     parsed = matter(rawContent);
   } catch (e) {
-    console.warn(`[atom-modes] Failed to parse frontmatter in '${filePath}': ${e}`);
+    console.warn(`[mode] Failed to parse frontmatter in '${filePath}': ${e}`);
     return null;
   }
 
@@ -82,7 +82,7 @@ async function loadModeDir(dir: string): Promise<ModeDef[]> {
           result.push(mode);
         } else {
           console.warn(
-            `[atom-modes] Skipping '${filePath}': missing or malformed frontmatter`,
+            `[mode] Skipping '${filePath}': missing or malformed frontmatter`,
           );
         }
       } catch {
@@ -112,7 +112,7 @@ async function loadModes(cwd: string): Promise<void> {
 
   if (globalDefaults.length > 1) {
     console.error(
-      `[atom-modes] Multiple global modes have default:true ` +
+      `[mode] Multiple global modes have default:true ` +
         `(${globalDefaults.map((m) => m.id).join(", ")}). ` +
         `Ignoring all global defaults.`,
     );
@@ -121,7 +121,7 @@ async function loadModes(cwd: string): Promise<void> {
 
   if (localDefaults.length > 1) {
     console.error(
-      `[atom-modes] Multiple project-local modes have default:true ` +
+      `[mode] Multiple project-local modes have default:true ` +
         `(${localDefaults.map((m) => m.id).join(", ")}). ` +
         `Ignoring all local defaults.`,
     );
@@ -133,7 +133,7 @@ async function loadModes(cwd: string): Promise<void> {
   for (const m of globalModes) merged.set(m.id, m);
   for (const m of localModes) {
     if (merged.has(m.id)) {
-      console.warn(`[atom-modes] Mode '${m.id}' overridden by project-local definition`);
+      console.warn(`[mode] Mode '${m.id}' overridden by project-local definition`);
     }
     merged.set(m.id, m);
   }
@@ -152,7 +152,7 @@ async function loadModes(cwd: string): Promise<void> {
 
   if (merged.size === 0) {
     console.warn(
-      "[atom-modes] No mode files found in ~/.pi/agent/modes/ or .pi/modes/. " +
+      "[mode] No mode files found in ~/.pi/agent/modes/ or .pi/modes/. " +
         "Installing built-in fallback mode. Copy examples/modes/*.md to ~/.pi/agent/modes/ to configure.",
     );
     modes = [
@@ -224,7 +224,7 @@ function switchToMode(idx: number, pi: ExtensionAPI, notifyFn: (msg: string) => 
   currentModeIndex = idx;
   lastInjectedModeId = null;
   const mode = modes[idx];
-  pi.appendEntry("atom-modes-state", { modeId: mode.id });
+  pi.appendEntry("mode-state", { modeId: mode.id });
   notifyFn(`Switched to ${mode.name} mode`);
   activeTui?.requestRender();
 }
@@ -261,7 +261,7 @@ export default function (pi: ExtensionAPI) {
           customType?: string;
           data?: { modeId?: string };
         };
-        if (entry.type === "custom" && entry.customType === "atom-modes-state") {
+        if (entry.type === "custom" && entry.customType === "mode-state") {
           const modeId = entry.data?.modeId;
           if (modeId) {
             const idx = modes.findIndex((m) => m.id === modeId);
@@ -271,7 +271,7 @@ export default function (pi: ExtensionAPI) {
             } else {
               // Persisted mode no longer exists (e.g. mode file was deleted).
               console.warn(
-                `[atom-modes] Persisted mode '${modeId}' not found; falling back to default.`,
+                `[mode] Persisted mode '${modeId}' not found; falling back to default.`,
               );
             }
           }
@@ -290,7 +290,7 @@ export default function (pi: ExtensionAPI) {
       if (idx >= 0) {
         currentModeIndex = idx;
       } else {
-        ctx.ui.notify(`[atom-modes] Unknown mode from --mode flag: '${flagMode}'`, "error");
+        ctx.ui.notify(`[mode] Unknown mode from --mode flag: '${flagMode}'`, "error");
       }
     }
 
@@ -378,7 +378,7 @@ export default function (pi: ExtensionAPI) {
       if (!target) {
         const mode = modes[currentModeIndex];
         if (!mode) {
-          ctx.ui.notify("[atom-modes] No modes loaded.", "warning");
+          ctx.ui.notify("[mode] No modes loaded.", "warning");
           return;
         }
         const toolList = [...mode.allowedTools].join(", ");
@@ -390,7 +390,7 @@ export default function (pi: ExtensionAPI) {
       if (idx < 0) {
         const available = modes.map((m) => m.id).join(", ");
         ctx.ui.notify(
-          `[atom-modes] Unknown mode: '${target}'. Available: ${available}`,
+          `[mode] Unknown mode: '${target}'. Available: ${available}`,
           "error",
         );
         return;

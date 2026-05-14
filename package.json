@@ -1,7 +1,7 @@
 {
-  "name": "atom-modes",
+  "name": "pi-personal-extensions",
   "version": "0.1.0",
-  "description": "Declarative mode system for pi-coding-agent",
+  "description": "Personal pi-coding-agent extensions",
   "keywords": ["pi-package"],
   "license": "MIT",
   "dependencies": {
@@ -13,6 +13,9 @@
     "typebox": "*"
   },
   "pi": {
-    "extensions": ["./index.ts"]
+    "extensions": [
+      "./extensions/mode/index.ts",
+      "./extensions/plan/index.ts"
+    ]
   }
 }

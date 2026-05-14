@@ -1,11 +1,11 @@
-# atom-modes — Design Notes
+# mode — Design Notes
 
-> This document records the design decisions made when implementing atom-modes.
+> This document records the design decisions made when implementing mode.
 > It is derived from the original `PLAN.org` specification.
 
 ## What this extension does
 
-atom-modes enforces operational modes on the LLM by:
+mode enforces operational modes on the LLM by:
 
 1. **Blocking disallowed tool calls** — via the `tool_call` event hook.
 2. **Injecting a mode reminder** — into the last user message before every
@@ -75,6 +75,6 @@ defaults in that scope are cleared.
 
 ### Extension independence
 
-atom-modes and atom-plan share no imports or runtime coupling. The only
+mode and plan share no imports or runtime coupling. The only
 connection between them is that mode files may list `create_plan` and `edit_plan`
 in their `tools` allowlists — plain strings with no code dependency.

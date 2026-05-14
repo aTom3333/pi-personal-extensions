@@ -1,4 +1,4 @@
-#+TITLE: atom-pi-extensions Implementation Plan
+#+TITLE: pi-personal-extensions Implementation Plan
 #+AUTHOR: Thomas
 #+CREATED: [2026-05-14]
 #+OPTIONS: toc:3 num:nil
@@ -6,19 +6,19 @@
 * Overview
 
 Two pi-coding-agent extensions that together implement VS Code Copilot-style
-operational modes. They are designed to be independent of each other: ~atom-plan~
-registers tools (~create_plan~, ~edit_plan~) that ~atom-modes~ may or may not permit
+operational modes. They are designed to be independent of each other: ~plan~
+registers tools (~create_plan~, ~edit_plan~) that ~mode~ may or may not permit
 depending on mode configuration, but neither extension has a compile-time or
 runtime dependency on the other.
 
 ** Extensions
 
-- ~atom-modes~ :: Declarative mode system. Controls which tools the LLM may use in
+- ~mode~ :: Declarative mode system. Controls which tools the LLM may use in
   a given mode and injects a mode-specific system reminder on each turn. All tools
   remain registered and active at all times (cache-stable); enforcement happens via
   ~tool_call~ interception.
 
-- ~atom-plan~ :: Plan file management. Provides ~create_plan~ and ~edit_plan~ tools,
+- ~plan~ :: Plan file management. Provides ~create_plan~ and ~edit_plan~ tools,
   tracks a "current plan" as session state, and injects the plan's org content into
   context whenever it changes or after a context reset.
 
@@ -27,13 +27,13 @@ runtime dependency on the other.
 The recommended setup is to track =~/.pi/agent/= as a git repository.
 
 - *Tracked:* =settings.json= (includes installed packages list), =keybindings.json=,
-  =AGENTS.md=, =models.json=, =modes/= (atom-modes config), =skills/=, =prompts/=.
+  =AGENTS.md=, =models.json=, =modes/= (mode config), =skills/=, =prompts/=.
 - *Gitignored:* =sessions/= (personal history), =git/= and =npm/= (installed package
   files, reproduced by =pi install=), =node_modules/=.
 - =settings.json= already records all installed packages in its =packages= array.
   Bootstrapping a new machine is: clone the repo, then
   =jq -r '.packages[]?' settings.json | xargs -I{} pi install {}=.
-- =atom-pi-extensions= is installed as a pi package and recorded in =settings.json=.
+- =pi-personal-extensions= is installed as a pi package and recorded in =settings.json=.
   Mode config files (=.md=) live in =~/.pi/agent/modes/= and are tracked by the
   config repo. Extension code and user config are versioned independently.
 
@@ -48,7 +48,7 @@ implementation.
    accumulated messages. All dynamic information (mode, plan) is injected into the
    last user message of the payload instead.
 
-2. *Extension independence.* ~atom-modes~ and ~atom-plan~ share no imports or
+2. *Extension independence.* ~mode~ and ~plan~ share no imports or
    runtime coupling. The only connection is that mode ~.md~ files may include
    ~create_plan~ and/or ~edit_plan~ in their tool allowlists — plain strings, no
    code dependency.
@@ -64,7 +64,7 @@ implementation.
 * Repository Structure
 
 #+BEGIN_EXAMPLE
-atom-pi-extensions/
+pi-personal-extensions/
 ├── PLAN.org                        ← this file
 ├── README.md
 ├── examples/
@@ -73,10 +73,10 @@ atom-pi-extensions/
 │       ├── plan.md
 │       └── ask.md
 └── extensions/
-    ├── atom-modes/
+    ├── mode/
     │   ├── package.json
     │   └── index.ts
-    └── atom-plan/
+    └── plan/
         ├── package.json
         └── index.ts
 #+END_EXAMPLE
@@ -88,13 +88,12 @@ other extensions that are not referenced in this repo at all.
 
 Each extension is a self-contained pi package installable via:
 #+BEGIN_EXAMPLE
-pi install git:github.com/<user>/atom-pi-extensions#extensions/atom-modes
-pi install git:github.com/<user>/atom-pi-extensions#extensions/atom-plan
+pi install git:github.com/aTom3333/pi-personal-extensions
 #+END_EXAMPLE
 
 Or placed directly in =~/.pi/agent/extensions/= for local use.
 
-* Extension 1: atom-modes
+* Extension 1: mode
 
 ** Purpose
 
@@ -308,7 +307,7 @@ function appendToLastUserMessage(payload: any, text: string): void {
 On switch:
 1. Update ~currentModeIndex~.
 2. Set ~lastInjectedModeId = null~ to force re-injection on the next turn.
-3. Persist via ~pi.appendEntry("atom-modes-state", { modeId: modes[currentModeIndex].id })~.
+3. Persist via ~pi.appendEntry("mode-state", { modeId: modes[currentModeIndex].id })~.
 4. Notify the user: ~ctx.ui.notify(`Switched to ${mode.name} mode`, "info")~.
 
 *** Session State & Persistence
@@ -318,7 +317,7 @@ On ~session_start~:
 - If ~reason === "new"~: reset to default mode (first mode whose id is ~"agent"~,
   or index 0 as fallback).
 - Otherwise: scan ~ctx.sessionManager.getEntries()~ in reverse for the last entry
-  with ~customType === "atom-modes-state"~. Restore ~currentModeIndex~ from
+  with ~customType === "mode-state"~. Restore ~currentModeIndex~ from
   ~entry.data.modeId~ if found.
 - If the ~--mode~ CLI flag is set, it overrides the restored state.
 
@@ -399,7 +398,7 @@ never loaded by the extension itself.
 
 *** DONE Write package.json
 
-* Extension 2: atom-plan
+* Extension 2: plan
 
 ** Purpose
 
@@ -465,7 +464,7 @@ let lastInjectedPlanContent: string | null = null;
 3. Derive filename: ~<YYYY-MM-DD>-<slug>.org~.
 4. Write ~content~ (or default template) to the file.
 5. Set ~currentPlanPath~ to the absolute file path.
-6. Persist: ~pi.appendEntry("atom-plan-state", { planFile: absolutePath })~.
+6. Persist: ~pi.appendEntry("plan-state", { planFile: absolutePath })~.
 7. Reset ~lastInjectedPlanContent = null~ to trigger immediate injection.
 8. Return success: "Plan created at ~<relative-path>~."
 
@@ -525,7 +524,7 @@ Reset ~lastInjectedPlanContent = null~ on:
   restored context.
 - ~session_compact~ — the compaction summary may not preserve the plan content.
 
-*Injection target:* Same ~appendToLastUserMessage~ helper pattern as ~atom-modes~.
+*Injection target:* Same ~appendToLastUserMessage~ helper pattern as ~mode~.
 The two extensions both modify the last user message; since ~before_provider_request~
 handlers chain (each sees the previous handler's mutations), the order they load
 determines which block appears first. This is acceptable.
@@ -540,11 +539,11 @@ determines which block appears first. This is acceptable.
 
 *** Session State & Persistence
 
-Persistence key: ~"atom-plan-state"~, data shape: ~{ planFile: string | null }~.
+Persistence key: ~"plan-state"~, data shape: ~{ planFile: string | null }~.
 
 On ~session_start~:
 - If ~reason === "new"~: ~currentPlanPath = null~, ~lastInjectedPlanContent = null~. Do not restore.
-- Otherwise: scan entries in reverse for the last ~atom-plan-state~ entry. If
+- Otherwise: scan entries in reverse for the last ~plan-state~ entry. If
   ~entry.data.planFile~ is a non-null string, set ~currentPlanPath~ to that value
   and ~lastInjectedPlanContent = null~. If ~null~, ~currentPlanPath = null~.
 
@@ -560,7 +559,7 @@ via ~ctx.ui.notify~).
 ~/plan clear~ :: Detach the current plan from the session.
 1. If no active plan, notify "No active plan."
 2. Set ~currentPlanPath = null~, ~lastInjectedPlanContent = null~.
-3. Persist: ~pi.appendEntry("atom-plan-state", { planFile: null })~.
+3. Persist: ~pi.appendEntry("plan-state", { planFile: null })~.
 4. Notify: "Plan detached. The file has not been deleted."
 
 ~/plan open~ :: Open the current plan file in ~$VISUAL~ (falling back to
@@ -629,5 +628,5 @@ Handle bare ~/plan~ (show), ~/plan clear~ (detach), ~/plan open~ (open in editor
   compatibility with alternative pi frontends.
 
 - Automated plan file deep-copy on fork :: Hook ~session_before_fork~ to copy the
-  plan file to a new path and rewrite the ~atom-plan-state~ entry in the new
+  plan file to a new path and rewrite the ~plan-state~ entry in the new
   session, eliminating the shared-file limitation.
