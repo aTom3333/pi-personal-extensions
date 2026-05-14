@@ -236,4 +236,29 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Further events and commands will be added in subsequent steps.
+
+  // ── Plan injection ────────────────────────────────────────────────────────
+  // Reads the plan file from disk on every provider request so manual edits
+  // are picked up automatically. Only injects when the content has changed
+  // since the last injection (or when lastInjectedPlanContent is null).
+  pi.on("before_provider_request", async (event, ctx) => {
+    if (currentPlanPath === null) return;
+
+    let content: string;
+    try {
+      content = await fs.readFile(currentPlanPath, "utf-8");
+    } catch {
+      // File was deleted or became unreadable externally — skip silently.
+      return;
+    }
+
+    if (content === lastInjectedPlanContent) return;
+
+    const relPath = path.relative(ctx.cwd, currentPlanPath);
+    appendToLastUserMessage(
+      event.payload as Record<string, unknown>,
+      `<current-plan path="${relPath}">\n${content}\n</current-plan>`,
+    );
+    lastInjectedPlanContent = content;
+  });
 }

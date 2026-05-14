@@ -579,7 +579,7 @@ Return success or error message.
 Validate plan exists. Read file. Apply sequential text replacements. Write file.
 Return updated content or first-failing edit error.
 
-*** TODO Implement plan injection in before_provider_request
+*** DONE Implement plan injection in before_provider_request
 Read plan from disk. Compare with ~lastInjectedPlanContent~. Inject if changed or
 null. Use ~appendToLastUserMessage~.
 
