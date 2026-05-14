@@ -590,7 +590,7 @@ Restore ~currentPlanPath~ from entries on non-new sessions. Reset
 *** DONE Implement session_compact handler
 Reset ~lastInjectedPlanContent~.
 
-*** TODO Register /plan command
+*** DONE Register /plan command
 Handle bare ~/plan~ (show path + content), ~/plan clear~ (detach).
 ~/plan open~ is deferred — see deferred note above.
 

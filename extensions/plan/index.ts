@@ -250,6 +250,90 @@ export default function (pi: ExtensionAPI) {
 
   // Further commands will be added in subsequent steps.
 
+  // ── /plan command ──────────────────────────────────────────────────────
+  pi.registerCommand("plan", {
+    description: "Manage the active plan. Subcommands: show, clear",
+    getArgumentCompletions: (prefix) => {
+      const subcommands = [
+        { value: "show",  label: "show  — display the full plan content" },
+        { value: "clear", label: "clear — detach the plan from this session" },
+        // open: deferred (editor integration to be designed separately)
+      ];
+      const filtered = subcommands.filter((s) => s.value.startsWith(prefix));
+      return filtered.length > 0 ? filtered : null;
+    },
+    handler: async (args, ctx) => {
+      const sub = args?.trim() ?? "";
+
+      // ── /plan ──────────────────────────────────────────────────────────
+      if (sub === "") {
+        if (currentPlanPath === null) {
+          ctx.ui.notify("No active plan.", "info");
+          return;
+        }
+        const filename = path.basename(currentPlanPath);
+        let title: string | null = null;
+        try {
+          const content = await fs.readFile(currentPlanPath, "utf-8");
+          const match = content.match(/^#\+TITLE:\s*(.+)$/im);
+          title = match ? match[1].trim() : null;
+        } catch {
+          // File unreadable — still show what we know
+        }
+        ctx.ui.notify(
+          title ? `Active plan: ${title} (${filename})` : `Active plan: ${filename}`,
+          "info",
+        );
+        return;
+      }
+
+      // ── /plan show ───────────────────────────────────────────────────
+      if (sub === "show") {
+        if (currentPlanPath === null) {
+          ctx.ui.notify("No active plan.", "info");
+          return;
+        }
+        let content: string;
+        try {
+          content = await fs.readFile(currentPlanPath, "utf-8");
+        } catch {
+          ctx.ui.notify("Could not read the plan file.", "error");
+          return;
+        }
+        const filename = path.basename(currentPlanPath);
+        ctx.ui.notify(`${filename}\n\n${content}`, "info");
+        return;
+      }
+
+      // ── /plan clear ──────────────────────────────────────────────────
+      if (sub === "clear") {
+        if (currentPlanPath === null) {
+          ctx.ui.notify("No active plan.", "info");
+          return;
+        }
+        currentPlanPath = null;
+        lastInjectedPlanContent = null;
+        pi.appendEntry("plan-state", { planFile: null });
+        ctx.ui.notify("Plan detached. The file has not been deleted.", "info");
+        return;
+      }
+
+      // ── /plan open (deferred) ────────────────────────────────────────
+      if (sub === "open") {
+        ctx.ui.notify(
+          "/plan open is not yet implemented. " +
+          (currentPlanPath !== null
+            ? `Plan file path: ${currentPlanPath}`
+            : "No active plan."),
+          "info",
+        );
+        return;
+      }
+
+      ctx.ui.notify(`Unknown subcommand: '${sub}'. Available: show, clear`, "error");
+    },
+  });
+
   // ── Plan injection ────────────────────────────────────────────────────────
   // Reads the plan file from disk on every provider request so manual edits
   // are picked up automatically. Only injects when the content has changed
