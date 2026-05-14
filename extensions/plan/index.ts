@@ -11,7 +11,7 @@
  * Plans live in <ctx.cwd>/.pi/plans/ (same root convention as pi itself).
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { createEditToolDefinition } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { promises as fs } from "node:fs";
@@ -27,6 +27,20 @@ let currentPlanPath: string | null = null;
  * null means "inject unconditionally on the next request".
  */
 let lastInjectedPlanContent: string | null = null;
+
+/**
+ * Static block added to the system prompt every session.
+ * Explains the <current-plan> injection so the LLM does not misinterpret it
+ * as the user pasting content. Always present (not conditional on an active
+ * plan) so it is stable across turns and does not invalidate the KV cache.
+ */
+const SYSTEM_PROMPT_ADDITION = `<plan-info>
+When a plan is active, its full content is automatically injected into your
+context as a <current-plan path="..."> block before each request. This is a
+background system injection — do not treat it as the user showing or pasting
+the plan. Use edit_plan to update the plan whenever the user provides
+feedback or new information.
+</plan-info>`;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -78,6 +92,35 @@ function enforceOrgHeader(title: string, content: string): string {
 }
 
 /**
+ * Parse org-mode content and extract task items (** headings).
+ * Returns array of { status: "TODO" | "DONE", title: string }.
+ */
+function parseTodoItems(
+  content: string,
+): Array<{ status: "TODO" | "DONE"; title: string }> {
+  const items: Array<{ status: "TODO" | "DONE"; title: string }> = [];
+  const lines = content.split("\n");
+  for (const line of lines) {
+    // Match "** TODO text" or "** DONE text"
+    const match = line.match(/^\*\*\s+(TODO|DONE)\s+(.+)$/);
+    if (match) {
+      const status = match[1] as "TODO" | "DONE";
+      const title = match[2];
+      items.push({ status, title });
+    }
+  }
+  return items;
+}
+
+/**
+ * Extract plan title from org content (#+TITLE: field).
+ */
+function extractPlanTitle(content: string): string | null {
+  const match = content.match(/^#\+TITLE:\s*(.+)$/im);
+  return match ? match[1].trim() : null;
+}
+
+/**
  * Append text to the last user message in a provider payload.
  * Handles both Anthropic (content array) and OpenAI (content string) shapes.
  * Duplicated from the mode extension — both extensions are intentionally
@@ -98,9 +141,69 @@ function appendToLastUserMessage(payload: Record<string, unknown>, text: string)
   }
 }
 
+/**
+ * Format todo items for display.
+ * Returns formatted output string with all tasks in one list, optionally styled with theme.
+ */
+function formatTodoList(content: string, theme?: Record<string, (color: string, text: string) => string>): string {
+  const items = parseTodoItems(content);
+  const completed = items.filter((i) => i.status === "DONE").length;
+  const total = items.length;
+
+  if (total === 0) {
+    return "No tasks.";
+  }
+
+  let output = `Tasks (${completed}/${total}):\n`;
+  for (const item of items) {
+    const statusKeyword = item.status;
+    let line = `${statusKeyword} ${item.title}`;
+    if (theme) {
+      const color = item.status === "DONE" ? "success" : "warning";
+      line = theme.fg(color, statusKeyword) + ` ${item.title}`;
+    }
+    output += `${line}\n`;
+  }
+
+  return output.trim();
+}
+
+/**
+ * Update the plan status line to show current plan name and todo counter.
+ * Format: "Plan: my-plan (2/5)" where 2 = completed, 5 = total.
+ */
+async function updatePlanStatus(ctx: ExtensionContext): Promise<void> {
+  if (currentPlanPath === null) {
+    ctx.ui.setStatus("plan", undefined);
+    return;
+  }
+
+  try {
+    const content = await fs.readFile(currentPlanPath, "utf-8");
+    const title = extractPlanTitle(content) ?? "(untitled)";
+    const items = parseTodoItems(content);
+    const completed = items.filter((i) => i.status === "DONE").length;
+    const total = items.length;
+    const label = total > 0 ? `Plan: ${title} (${completed}/${total})` : `Plan: ${title}`;
+    ctx.ui.setStatus("plan", label);
+  } catch {
+    // File unreadable — show title only
+    ctx.ui.setStatus("plan", undefined);
+  }
+}
+
 // ── Extension entry point ──────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
+
+  // ── Static system-prompt injection ────────────────────────────────────────────────
+  // Explains the <current-plan> injection format so the LLM does not
+  // misinterpret it as the user pasting content. Always injected regardless
+  // of whether a plan is active — stable across all turns, no cache
+  // invalidation.
+  pi.on("before_agent_start", async (event) => {
+    return { systemPrompt: event.systemPrompt + "\n\n" + SYSTEM_PROMPT_ADDITION };
+  });
 
   // ── create_plan tool ───────────────────────────────────────────────────
   pi.registerTool({
@@ -148,6 +251,7 @@ export default function (pi: ExtensionAPI) {
       currentPlanPath = absPath;
       lastInjectedPlanContent = null; // trigger immediate injection on next turn
       pi.appendEntry("plan-state", { planFile: absPath });
+      await updatePlanStatus(ctx);
 
       return {
         content: [{ type: "text", text: `Plan created: ${filename}.` }],
@@ -206,6 +310,15 @@ export default function (pi: ExtensionAPI) {
         ctx,
       );
 
+      // If edit was successful, append the updated todo list for immediate feedback
+      if (!result.isError) {
+        const updatedContent = await fs.readFile(currentPlanPath, "utf-8");
+        const todoOutput = formatTodoList(updatedContent, ctx.ui.theme as any);
+        ctx.ui.notify(`Plan updated. Todo status:\n${todoOutput}`, "info");
+        // Also refresh the status line
+        await updatePlanStatus(ctx);
+      }
+
       // Pass through the built-in result (success message + diff, or error),
       // replacing the absolute path with just the filename in all cases.
       return {
@@ -224,6 +337,7 @@ export default function (pi: ExtensionAPI) {
     if (event.reason === "new") {
       currentPlanPath = null;
       lastInjectedPlanContent = null;
+      await updatePlanStatus(ctx);
       return;
     }
 
@@ -234,6 +348,7 @@ export default function (pi: ExtensionAPI) {
       if (entry.type === "custom" && entry.customType === "plan-state") {
         currentPlanPath = typeof entry.data?.planFile === "string" ? entry.data.planFile : null;
         lastInjectedPlanContent = null; // always re-inject at the start of a restored session
+        await updatePlanStatus(ctx);
         return;
       }
     }
@@ -241,6 +356,7 @@ export default function (pi: ExtensionAPI) {
     // No persisted state found — start clean.
     currentPlanPath = null;
     lastInjectedPlanContent = null;
+    await updatePlanStatus(ctx);
   });
 
   pi.on("session_compact", async () => {
@@ -248,15 +364,20 @@ export default function (pi: ExtensionAPI) {
     lastInjectedPlanContent = null;
   });
 
+  pi.on("session_shutdown", async (_event, ctx) => {
+    ctx.ui.setStatus("plan", undefined);
+  });
+
   // Further commands will be added in subsequent steps.
 
   // ── /plan command ──────────────────────────────────────────────────────
   pi.registerCommand("plan", {
-    description: "Manage the active plan. Subcommands: show, clear",
+    description: "Manage the active plan. Subcommands: show, clear, todo",
     getArgumentCompletions: (prefix) => {
       const subcommands = [
         { value: "show",  label: "show  — display the full plan content" },
         { value: "clear", label: "clear — detach the plan from this session" },
+        { value: "todo",  label: "todo  — list TODO and DONE items" },
         // open: deferred (editor integration to be designed separately)
       ];
       const filtered = subcommands.filter((s) => s.value.startsWith(prefix));
@@ -314,6 +435,7 @@ export default function (pi: ExtensionAPI) {
         currentPlanPath = null;
         lastInjectedPlanContent = null;
         pi.appendEntry("plan-state", { planFile: null });
+        await updatePlanStatus(ctx);
         ctx.ui.notify("Plan detached. The file has not been deleted.", "info");
         return;
       }
@@ -330,7 +452,25 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      ctx.ui.notify(`Unknown subcommand: '${sub}'. Available: show, clear`, "error");
+      // ── /plan todo ──────────────────────────────────
+      if (sub === "todo") {
+        if (currentPlanPath === null) {
+          ctx.ui.notify("No active plan.", "info");
+          return;
+        }
+        let content: string;
+        try {
+          content = await fs.readFile(currentPlanPath, "utf-8");
+        } catch {
+          ctx.ui.notify("Could not read the plan file.", "error");
+          return;
+        }
+        const output = formatTodoList(content, ctx.ui.theme as any);
+        ctx.ui.notify(output, "info");
+        return;
+      }
+
+      ctx.ui.notify(`Unknown subcommand: '${sub}'. Available: show, clear, todo`, "error");
     },
   });
 
