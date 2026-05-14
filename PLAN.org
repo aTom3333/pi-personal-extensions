@@ -468,8 +468,9 @@ let lastInjectedPlanContent: string | null = null;
 7. Reset ~lastInjectedPlanContent = null~ to trigger immediate injection.
 8. Return success: "Plan created at ~<relative-path>~."
 
-*The project root* is determined as the nearest ancestor directory containing a
-~.pi/~ directory, falling back to ~ctx.cwd~.
+*The project root* is simply ~ctx.cwd~ (the same convention pi itself uses for
+all project-local config under ~.pi/~). Plans are always written to
+~<ctx.cwd>/.pi/plans/~.
 
 *** edit_plan
 
@@ -562,12 +563,14 @@ via ~ctx.ui.notify~).
 3. Persist: ~pi.appendEntry("plan-state", { planFile: null })~.
 4. Notify: "Plan detached. The file has not been deleted."
 
-~/plan open~ :: Open the current plan file in ~$VISUAL~ (falling back to
-~$EDITOR~, then ~vi~) using ~pi.exec~. If no active plan, notify "No active plan."
+~/plan open~ :: *Deferred.* External-editor integration (e.g. Emacs) is better
+handled on the editor side. What pi needs to expose is a way to retrieve the
+current plan file path; that thin command will be added when the editor
+integration is designed. For now, the path is visible in ~/plan~ output.
 
 ** Tasks
 
-*** TODO Implement create_plan tool
+*** DONE Implement create_plan tool
 Validate no existing plan. Derive filename from title. Create ~.pi/plans/~ dir if
 needed. Write file with content or default template. Update state. Persist.
 Return success or error message.
@@ -588,7 +591,8 @@ Restore ~currentPlanPath~ from entries on non-new sessions. Reset
 Reset ~lastInjectedPlanContent~.
 
 *** TODO Register /plan command
-Handle bare ~/plan~ (show), ~/plan clear~ (detach), ~/plan open~ (open in editor).
+Handle bare ~/plan~ (show path + content), ~/plan clear~ (detach).
+~/plan open~ is deferred — see deferred note above.
 
 *** TODO Write package.json
 
