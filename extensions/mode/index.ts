@@ -38,6 +38,8 @@ let modes: ModeDef[] = [];
 let currentModeIndex = 0;
 let lastInjectedModeId: string | null = null;
 let activeTui: TUI | undefined;
+// Built once per session from modes[] — stable across turns, safe to put in system prompt.
+let systemPromptAddition = "";
 
 // ── Mode file loading ──────────────────────────────────────────────────────
 
@@ -168,6 +170,8 @@ async function loadModes(cwd: string): Promise<void> {
   } else {
     modes = [...merged.values()];
   }
+  // Rebuild the static system-prompt block whenever modes are (re-)loaded.
+  systemPromptAddition = buildSystemPromptAddition();
 }
 
 function findDefaultModeIndex(): number {
@@ -179,6 +183,29 @@ function findDefaultModeIndex(): number {
   if (agent >= 0) return agent;
   // 3. First loaded mode
   return 0;
+}
+
+/**
+ * Build the static block injected into the system prompt once per session.
+ * Derived solely from modes[] which is stable for the lifetime of a session,
+ * so the resulting string never changes between turns — no cache invalidation.
+ */
+function buildSystemPromptAddition(): string {
+  const modeList = modes.map((m) => `  - ${m.id} (${m.name})`).join("\n");
+  return [
+    "<mode-info>",
+    "Operational modes are active. Each mode restricts which tools you may call.",
+    "",
+    "Available modes:",
+    modeList,
+    "",
+    "Commands: /mode → show current mode and allowed tools | /mode <id> → switch mode",
+    "Shortcuts: Ctrl+Shift+L → next mode | Ctrl+Shift+H → previous mode",
+    "",
+    "If a tool call is rejected and the user seems confused, suggest running /mode",
+    "to inspect restrictions or switching to a mode that allows the needed tool.",
+    "</mode-info>",
+  ].join("\n");
 }
 
 // ── Injection helpers ──────────────────────────────────────────────────────
@@ -335,6 +362,15 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_shutdown", async () => {
     activeTui = undefined;
+  });
+
+  // ── Static system-prompt injection ───────────────────────────────────────
+  // Appends a stable <mode-info> block on every turn. The content is built
+  // once from modes[] at session_start and never changes mid-session, so it
+  // does not invalidate the provider's KV-tensor cache.
+  pi.on("before_agent_start", async (event) => {
+    if (!systemPromptAddition) return;
+    return { systemPrompt: event.systemPrompt + "\n\n" + systemPromptAddition };
   });
 
   // ── Tool call interception ───────────────────────────────────────────────
