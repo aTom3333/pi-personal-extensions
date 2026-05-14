@@ -93,3 +93,10 @@ The body after the second `---` is the mode prompt injected as a system reminder
 ```bash
 pi --mode ask     # start in ask mode
 ```
+
+## Load Order
+
+The `mode` extension short-circuits `tool_call` chains on block. For this to
+work correctly with permission-gating extensions (those that confirm dangerous
+tool calls), `mode` must appear **first** in your `packages` list in
+`~/.pi/agent/settings.json`. See `extensions/mode/DESIGN.md` for details.

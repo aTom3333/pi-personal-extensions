@@ -11,6 +11,31 @@ mode enforces operational modes on the LLM by:
 2. **Injecting a mode reminder** — into the last user message before every
    provider request where the active mode has changed since the last injection.
 
+### Load order matters for permission-gating extensions
+
+pi runs `tool_call` handlers in **extension load order** and short-circuits on
+the first `{ block: true }` return — subsequent handlers do not run.
+
+This means: if a permission-gating extension (one that shows a confirmation
+dialog on tool calls) loads *before* the mode extension, it will prompt the
+user even for tools that mode would have blocked anyway.
+
+To avoid this, ensure the mode extension is listed **before** any
+permission-gating extensions in your `~/.pi/agent/settings.json` `packages`
+array:
+
+```json
+{
+  "packages": [
+    "git:github.com/<user>/pi-personal-extensions#extensions/mode",
+    "git:github.com/<user>/my-permission-extension"
+  ]
+}
+```
+
+pi processes packages in array order within each scope (global, then project),
+so position in the array is the reliable way to control handler priority.
+
 ## Key design decisions
 
 ### Allowlist over blocklist
