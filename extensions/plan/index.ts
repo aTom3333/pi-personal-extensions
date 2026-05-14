@@ -12,6 +12,7 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { createEditToolDefinition } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -154,5 +155,85 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // Further tools, events, and commands will be added in subsequent steps.
+  // ── edit_plan tool ────────────────────────────────────────────────────
+  // Semantics are intentionally identical to pi's built-in edit tool
+  // (uniqueness enforcement, fuzzy matching, line-ending normalisation, diff
+  // output) — achieved by delegating to createEditToolDefinition internally.
+  // The only differences: the file path is fixed (the active plan), and the
+  // success response returns the full updated file content instead of the
+  // built-in "Successfully replaced N block(s)" message.
+  pi.registerTool({
+    name: "edit_plan",
+    label: "Edit Plan",
+    description:
+      "Apply one or more text replacements to the active plan file. " +
+      "Behaves identically to the built-in edit tool: each oldText must be " +
+      "unique in the file and edits must not overlap.",
+    parameters: Type.Object({
+      edits: Type.Array(
+        Type.Object({
+          oldText: Type.String({
+            description:
+              "Exact text for one targeted replacement. " +
+              "It must be unique in the file and must not overlap with any other edits[].oldText in the same call.",
+          }),
+          newText: Type.String({ description: "Replacement text for this targeted edit." }),
+        }),
+        {
+          description:
+            "One or more targeted replacements. Each edit is matched against " +
+            "the original file, not incrementally.",
+        },
+      ),
+    }),
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
+      if (currentPlanPath === null) {
+        return {
+          content: [{ type: "text", text: "No active plan. Use create_plan first." }],
+          isError: true,
+        };
+      }
+
+      const filename = path.basename(currentPlanPath);
+
+      // Delegate to the built-in edit tool's engine.
+      const editDef = createEditToolDefinition(ctx.cwd);
+      const result = await editDef.execute(
+        toolCallId,
+        { path: currentPlanPath, edits: params.edits },
+        signal,
+        onUpdate,
+        ctx,
+      );
+
+      if (result.isError) {
+        // The built-in error messages include the absolute path — replace it
+        // with just the filename to keep output consistent with the rest of
+        // this extension. A bit ugly, but avoids re-implementing the engine.
+        return {
+          ...result,
+          content: result.content.map((block) =>
+            block.type === "text"
+              ? { ...block, text: block.text.replaceAll(currentPlanPath!, filename) }
+              : block,
+          ),
+        };
+      }
+
+      // On success: pass through the built-in result (success message + diff).
+      // The full updated plan will be injected into context on the next turn
+      // via before_provider_request — no need to duplicate it here.
+      // lastInjectedPlanContent is intentionally NOT updated here.
+      return {
+        ...result,
+        content: result.content.map((block) =>
+          block.type === "text"
+            ? { ...block, text: block.text.replaceAll(currentPlanPath!, filename) }
+            : block,
+        ),
+      };
+    },
+  });
+
+  // Further events and commands will be added in subsequent steps.
 }

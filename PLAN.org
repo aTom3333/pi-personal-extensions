@@ -575,7 +575,7 @@ Validate no existing plan. Derive filename from title. Create ~.pi/plans/~ dir i
 needed. Write file with content or default template. Update state. Persist.
 Return success or error message.
 
-*** TODO Implement edit_plan tool
+*** DONE Implement edit_plan tool
 Validate plan exists. Read file. Apply sequential text replacements. Write file.
 Return updated content or first-failing edit error.
 
