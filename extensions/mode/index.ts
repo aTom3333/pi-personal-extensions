@@ -197,7 +197,7 @@ function buildSystemPromptAddition(): string {
     modeList,
     "",
     "Commands: /mode → show current mode and allowed tools | /mode <id> → switch mode",
-    "Shortcuts: Ctrl+Shift+L → next mode | Ctrl+Shift+H → previous mode",
+    "Shortcuts: Alt+L → next mode | Alt+H → previous mode",
     "",
     "If a tool call is rejected and the user seems confused, suggest running /mode",
     "to inspect restrictions or switching to a mode that allows the needed tool.",
@@ -410,7 +410,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ── Shortcuts ─────────────────────────────────────────────────────────────
-  pi.registerShortcut("ctrl+shift+l", {
+  pi.registerShortcut("alt+l", {
     description: "Next mode",
     handler: async (ctx) => {
       if (modes.length === 0) return;
@@ -419,7 +419,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  pi.registerShortcut("ctrl+shift+h", {
+  pi.registerShortcut("alt+h", {
     description: "Previous mode",
     handler: async (ctx) => {
       if (modes.length === 0) return;
