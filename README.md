@@ -4,16 +4,9 @@
 > [pi-coding-agent](https://github.com/mariozechner/pi-coding-agent)).
 > The design, requirements, and review are by the human author.
 
-A set of [pi-coding-agent](https://github.com/mariozechner/pi-coding-agent) extensions
-for operational modes and plan management in pi.
-
-## Install
-
-```bash
-pi install git:github.com/<user>/pi-personal-extensions
-```
-
-Both extensions are installed at once.
+A collection of independent [pi-coding-agent](https://github.com/mariozechner/pi-coding-agent)
+extensions. Each extension is self-contained and can be installed and used on its own —
+there are no dependencies between them.
 
 ## Extensions
 
@@ -27,6 +20,41 @@ and injects a mode-specific system reminder on each turn.
 Plan file management. Provides `create_plan` and `edit_plan` tools, tracks a
 "current plan" as session state, and injects the plan's org content into context
 whenever it changes.
+
+### read-only-bash
+
+Provides a `read_only_bash` tool: a bash shell sandboxed via
+[bubblewrap](https://github.com/containers/bubblewrap) where the entire
+filesystem is mounted read-only and network access is blocked at the OS level.
+No command analysis — writes fail with `EROFS` regardless of the command.
+
+See [`extensions/read-only-bash/README.md`](extensions/read-only-bash/README.md)
+for setup instructions (Linux and Windows/WSL) and usage notes.
+
+## Install
+
+**All extensions at once:**
+
+```bash
+pi install git:github.com/aTom3333/pi-personal-extensions
+```
+
+**A single extension** — clone the repository and add the extension path to the
+`extensions` array in `~/.pi/agent/settings.json`:
+
+```bash
+git clone https://github.com/aTom3333/pi-personal-extensions.git ~/pi-personal-extensions
+```
+
+```json
+{
+  "extensions": [
+    "/home/you/pi-personal-extensions/extensions/read-only-bash"
+  ]
+}
+```
+
+Replace `read-only-bash` with whichever extension(s) you want.
 
 ## Setup
 
