@@ -25,6 +25,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { createBashToolDefinition, type BashOperations } from "@mariozechner/pi-coding-agent";
 import { spawn } from "node:child_process";
+import { Text } from "@mariozechner/pi-tui";
 
 // ── Path helpers ──────────────────────────────────────────────────────────────
 
@@ -150,6 +151,30 @@ export default function (pi: ExtensionAPI) {
     ...baseDef,
     name: "read_only_bash",
     label: "Bash (read-only)",
+    renderCall(args, theme, context) {
+      // Copied from createBashToolDefinition's renderCall with [ro] prefix added
+      // to visually distinguish read-only-bash from regular bash in the chat.
+      // Preserve the timing state that renderResult depends on
+      const state = context.state;
+      if (context.executionStarted && state.startedAt === undefined) {
+        state.startedAt = Date.now();
+        state.endedAt = undefined;
+      }
+      const command = args.command ?? "";
+      const timeoutSuffix = args.timeout
+        ? theme.fg("muted", ` (timeout ${args.timeout}s)`)
+        : "";
+      const commandDisplay = command
+        ? command
+        : theme.fg("toolOutput", "...");
+      const text = context.lastComponent ?? new Text("", 0, 0);
+      text.setText(
+        theme.fg("muted", "[ro]") +
+        theme.fg("toolTitle", theme.bold(`$ ${commandDisplay}`)) +
+        timeoutSuffix,
+      );
+      return text;
+    },
     description:
       "Execute bash commands in a read-only sandbox. " +
       "The entire filesystem is mounted read-only at the OS level via bubblewrap " +
