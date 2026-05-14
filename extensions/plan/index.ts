@@ -206,24 +206,8 @@ export default function (pi: ExtensionAPI) {
         ctx,
       );
 
-      if (result.isError) {
-        // The built-in error messages include the absolute path — replace it
-        // with just the filename to keep output consistent with the rest of
-        // this extension. A bit ugly, but avoids re-implementing the engine.
-        return {
-          ...result,
-          content: result.content.map((block) =>
-            block.type === "text"
-              ? { ...block, text: block.text.replaceAll(currentPlanPath!, filename) }
-              : block,
-          ),
-        };
-      }
-
-      // On success: pass through the built-in result (success message + diff).
-      // The full updated plan will be injected into context on the next turn
-      // via before_provider_request — no need to duplicate it here.
-      // lastInjectedPlanContent is intentionally NOT updated here.
+      // Pass through the built-in result (success message + diff, or error),
+      // replacing the absolute path with just the filename in all cases.
       return {
         ...result,
         content: result.content.map((block) =>
@@ -235,7 +219,36 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // Further events and commands will be added in subsequent steps.
+  // ── Session lifecycle ────────────────────────────────────────────────────────
+  pi.on("session_start", async (event, ctx) => {
+    if (event.reason === "new") {
+      currentPlanPath = null;
+      lastInjectedPlanContent = null;
+      return;
+    }
+
+    // Restored/reloaded/forked session: recover the last persisted plan path.
+    const entries = ctx.sessionManager.getEntries();
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const entry = entries[i] as { type: string; customType?: string; data?: { planFile?: string | null } };
+      if (entry.type === "custom" && entry.customType === "plan-state") {
+        currentPlanPath = typeof entry.data?.planFile === "string" ? entry.data.planFile : null;
+        lastInjectedPlanContent = null; // always re-inject at the start of a restored session
+        return;
+      }
+    }
+
+    // No persisted state found — start clean.
+    currentPlanPath = null;
+    lastInjectedPlanContent = null;
+  });
+
+  pi.on("session_compact", async () => {
+    // Compaction may not preserve the plan in the summary — force re-injection.
+    lastInjectedPlanContent = null;
+  });
+
+  // Further commands will be added in subsequent steps.
 
   // ── Plan injection ────────────────────────────────────────────────────────
   // Reads the plan file from disk on every provider request so manual edits

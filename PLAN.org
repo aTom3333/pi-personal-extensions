@@ -583,11 +583,11 @@ Return updated content or first-failing edit error.
 Read plan from disk. Compare with ~lastInjectedPlanContent~. Inject if changed or
 null. Use ~appendToLastUserMessage~.
 
-*** TODO Implement session_start handler
+*** DONE Implement session_start handler
 Restore ~currentPlanPath~ from entries on non-new sessions. Reset
 ~lastInjectedPlanContent~. Leave state empty on reason "new".
 
-*** TODO Implement session_compact handler
+*** DONE Implement session_compact handler
 Reset ~lastInjectedPlanContent~.
 
 *** TODO Register /plan command
