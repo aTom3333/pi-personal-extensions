@@ -1,0 +1,14 @@
+{
+  "name": "atom-plan",
+  "version": "0.1.0",
+  "description": "Plan file management tools for pi-coding-agent",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": ["./index.ts"]
+  }
+}

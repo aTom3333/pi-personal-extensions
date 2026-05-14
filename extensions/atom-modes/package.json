@@ -1,0 +1,18 @@
+{
+  "name": "atom-modes",
+  "version": "0.1.0",
+  "description": "Declarative mode system for pi-coding-agent",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "dependencies": {
+    "gray-matter": "^4.0.3"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": ["./index.ts"]
+  }
+}

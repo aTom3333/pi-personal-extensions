@@ -133,6 +133,12 @@ Frontmatter fields:
   ~muted~, ~success~, ~error~, ~dim~. Defaults to ~accent~.
 - ~tools~ :: Allowlist of tool names. Only these tools may be called while this
   mode is active. Any tool not listed is blocked.
+- ~default~ :: Set to ~true~ to mark this mode as the default for new sessions.
+  At most one global mode and one project-local mode may set this. If both do,
+  the project-local one wins (not an error). Multiple defaults within the same
+  scope is an error and all defaults in that scope are cleared. If no mode has
+  ~default: true~, the mode with id ~"agent"~ is used; failing that, the first
+  loaded mode.
 
 The body after the second ~---~ is the mode prompt. It is included verbatim in the
 ~<system-reminder>~ injection. May be empty (agent mode).
@@ -348,48 +354,50 @@ Registered via ~pi.registerFlag("mode", { type: "string" })~.
 
 ** Tasks
 
-*** TODO Discover and parse mode .md files in session_start handler
+*** DONE Discover and parse mode .md files in session_start handler
 Read from =$PI_CODING_AGENT_DIR/modes/= and =.pi/modes/= (relative to =ctx.cwd=).
-Merge with project-local overriding global by id. Parse YAML frontmatter (name,
-color, tools allowlist). Parse body as mode prompt. Log warnings for malformed
-files. Emit warning and install hard-coded fallback if no files found. Populate
-=modes[]=.
+Merge with project-local overriding global by id. Parse YAML frontmatter using
+=gray-matter= (name, color, tools allowlist, default flag). Parse body as mode
+prompt. Log warnings for malformed files. Emit error and clear defaults if
+multiple defaults exist in the same scope; project-local default beats global
+default when both are set. Emit warning and install hard-coded fallback if no
+files found. Populate =modes[]=.
 
-*** TODO Implement tool_call interception
+*** DONE Implement tool_call interception
 Subscribe to ~tool_call~ event. Check ~event.toolName~ against current mode's
 ~allowedTools~. Return ~{ block: true, reason: "..." }~ with list of available tools
 if not allowed.
 
-*** TODO Implement mode reminder injection
+*** DONE Implement mode reminder injection
 Subscribe to ~before_provider_request~. Build injection text from current mode.
 Call ~appendToLastUserMessage~. Update ~lastInjectedModeId~.
 
-*** TODO Implement appendToLastUserMessage helper
+*** DONE Implement appendToLastUserMessage helper
 Handle Anthropic (content array) and OpenAI (content string) payload shapes.
 
-*** TODO Implement session_start handler
+*** DONE Implement session_start handler
 Restore mode from session entries. Handle ~"new"~ reason. Apply ~--mode~ flag.
 Reset ~lastInjectedModeId~.
 
-*** TODO Implement session_compact handler
+*** DONE Implement session_compact handler
 Reset ~lastInjectedModeId~.
 
-*** TODO Register /mode command with autocomplete
+*** DONE Register /mode command with autocomplete
 Show current mode on bare ~/mode~. Switch on ~/mode <id>~. Notify on success/error.
 Wire argument autocompletion.
 
-*** TODO Register Ctrl+Shift+L / Ctrl+Shift+H shortcuts
+*** DONE Register Ctrl+Shift+L / Ctrl+Shift+H shortcuts
 
-*** TODO Register --mode CLI flag
+*** DONE Register --mode CLI flag
 
-*** TODO Implement editor label (CustomEditor subclass)
+*** DONE Implement editor label (CustomEditor subclass)
 Render current mode name in mode's colour on editor bottom border.
 
-*** TODO Write example mode files: examples/modes/agent.md, plan.md, ask.md
+*** DONE Write example mode files: examples/modes/agent.md, plan.md, ask.md
 These are reference files for users to copy into =~/.pi/agent/modes/=. They are
 never loaded by the extension itself.
 
-*** TODO Write package.json
+*** DONE Write package.json
 
 * Extension 2: atom-plan
 
