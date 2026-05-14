@@ -196,11 +196,11 @@ function buildSystemPromptAddition(): string {
     "Available modes:",
     modeList,
     "",
-    "Commands: /mode → show current mode and allowed tools | /mode <id> → switch mode",
-    "Shortcuts: Alt+L → next mode | Alt+H → previous mode",
+    "At the start of each turn, a <system-reminder> tag is injected with the",
+    "current mode name, its allowed tools, and any mode-specific instructions.",
     "",
-    "If a tool call is rejected and the user seems confused, suggest running /mode",
-    "to inspect restrictions or switching to a mode that allows the needed tool.",
+    "Commands: /mode → show current mode and allowed tools | /mode <id> → switch mode",
+    "Shortcuts: Ctrl+Shift+L → next mode | Ctrl+Shift+H → previous mode",
     "</mode-info>",
   ].join("\n");
 }
