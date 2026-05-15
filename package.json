@@ -16,7 +16,8 @@
     "extensions": [
       "./extensions/mode/index.ts",
       "./extensions/plan/index.ts",
-      "./extensions/read-only-bash/index.ts"
+      "./extensions/read-only-bash/index.ts",
+      "./extensions/force-english-bash/index.ts"
     ]
   }
 }

@@ -87,13 +87,20 @@ function createBwrapOperations(): BashOperations {
       const args    = isWindows ? ["--", "bwrap", ...bwrapArgs] : bwrapArgs;
 
       return new Promise((resolve, reject) => {
+        // Prepare environment with English locale forcing
+        const execEnv = {
+          ...(env ?? process.env),
+          LANG: "en_US.UTF-8",
+          LANGUAGE: "en",
+        };
+
         const child = spawn(program, args, {
           cwd,
           // detached=true on Unix so we can kill the whole process group;
           // false on Windows (taskkill handles the tree instead)
           detached: process.platform !== "win32",
-          // Forward env so pi's PATH injection (getShellEnv) reaches the sandbox
-          env: env ?? process.env,
+          // Forward env with English locale forcing
+          env: execEnv,
           stdio: ["ignore", "pipe", "pipe"],
         });
 
@@ -176,7 +183,7 @@ export default function (pi: ExtensionAPI) {
       return text;
     },
     description:
-      "Execute bash commands in a read-only sandbox. " +
+      "Execute bash commands in a read-only sandbox with forced English output. " +
       "The entire filesystem is mounted read-only at the OS level via bubblewrap " +
       "(Linux) or bubblewrap inside WSL (Windows) — no filesystem write can " +
       "succeed and network access is fully blocked. " +

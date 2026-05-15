@@ -27,9 +27,23 @@ Provides a `read_only_bash` tool: a bash shell sandboxed via
 [bubblewrap](https://github.com/containers/bubblewrap) where the entire
 filesystem is mounted read-only and network access is blocked at the OS level.
 No command analysis — writes fail with `EROFS` regardless of the command.
+Output is forced to English for reliable parsing.
 
 See [`extensions/read-only-bash/README.md`](extensions/read-only-bash/README.md)
 for setup instructions (Linux and Windows/WSL) and usage notes.
+
+### force-english-bash
+
+Overrides the built-in `bash` tool to force English output by injecting locale
+environment variables (`LANG`, `LC_ALL`, `LANGUAGE`). Useful on systems with
+non-English locale settings, ensuring the agent can reliably parse command output.
+
+The overridden tool:
+- Functions identically to the built-in bash tool
+- Automatically forces English output for all commands
+- Updated description clarifies it's for non-read-only operations
+
+For read-only command execution, use `read_only_bash` instead.
 
 ## Install
 
